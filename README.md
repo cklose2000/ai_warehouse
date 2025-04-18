@@ -1,3 +1,5 @@
+![AI Warehouse Logo](ai_warehouse_pic2.png)
+
 # AI Warehouse: AI-Powered DBA Web UI
 
 This project is a modern, intuitive web-based UI for database administration and SQL analytics, inspired by Amazon Redshift Query Editor v2, with deep AI chat assistant (LLM) integration.
