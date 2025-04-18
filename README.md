@@ -41,6 +41,19 @@ This project is a modern, intuitive web-based UI for database administration and
 - **History Persistence**: Every executed query and chat is saved to the database for auditing.
 - **Security**: API keys secured in `.env`, backend never exposes secrets to frontend, user input validated.
 
+## Current Status (2025-04-18)
+
+- The AI assistant now answers **only using schema embeddings**; all documentation and md_chunks vector store context have been removed from the prompt, ensuring the agent relies strictly on the schema.
+- The system prompt is highly forceful and isolated, instructing the LLM to use only the schema and ignore system catalogs, meta-commands, and general knowledge.
+- Frontend vetting logic flags hallucinated table names and provides user controls for regenerating or approving responses.
+- The chat panel now auto-scrolls to the latest message, improving UX.
+- All major blockers around context leakage and hallucinated SQL have been mitigated. Backend guardrails are recommended for 100% reliability on schema enumeration/count queries.
+- All code and configuration changes are up to date with the current state.
+
+### Next Steps
+- (Optional) Add backend interception for schema enumeration/count queries for guaranteed accuracy.
+- Continue polish, code cleanup, and user experience improvements as needed.
+
 ## Project Structure
 ```
 /ai-warehouse/

@@ -4,6 +4,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const { embedText } = require('./openai');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -74,28 +75,57 @@ app.post('/api/ai-chat', async (req, res) => {
   const { message, editorContents } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
-  // 1. Retrieve top schema embeddings (e.g., top 3 by similarity)
+  // 1. Embed user message using OpenAI
+  let userEmbedding;
+  try {
+    userEmbedding = await embedText(message);
+    console.log('[AI-CHAT] User message:', message);
+    console.log('[AI-CHAT] User embedding:', userEmbedding.slice(0, 5), '...');
+  } catch (e) {
+    console.error('[AI-CHAT] Embedding failed:', e);
+    return res.status(500).json({ error: 'Embedding failed: ' + (e.message || e) });
+  }
+  // Convert JS array to Postgres vector string format '[0.1,0.2,...]'
+  const pgvector = '[' + userEmbedding.join(',') + ']';
+
+  // 2. Retrieve full schema for context
   let schemaContext = '';
+  let schemaRows = [];
   try {
     const schemaResults = await pool.query(
-      `SELECT table_name, column_name, description FROM schema_embeddings ORDER BY embedding <#> (SELECT embedding FROM schema_embeddings ORDER BY embedding <#> (SELECT embedding FROM schema_embeddings WHERE description IS NOT NULL LIMIT 1) LIMIT 1) LIMIT 3`
+      `SELECT table_name, column_name FROM schema_embeddings`
     );
-    schemaContext = schemaResults.rows.map(r => `${r.table_name}.${r.column_name}: ${r.description}`).join('\n');
-  } catch (e) { schemaContext = ''; }
+    schemaRows = schemaResults.rows;
+    // Only use valid, unique table.column pairs for schema context
+    const uniquePairs = Array.from(new Set(schemaRows
+      .filter(r => r.table_name)
+      .map(r => r.column_name ? `${r.table_name}.${r.column_name}` : r.table_name)
+    ));
+    schemaContext = uniquePairs.join('\n');
+    console.log('[AI-CHAT] Full schema rows:', schemaRows.length);
+    console.log('[AI-CHAT] Unique table/column pairs:', uniquePairs.length);
+  } catch (e) {
+    console.error('[AI-CHAT] Schema fetch failed:', e);
+    schemaContext = '';
+  }
 
-  // 2. Retrieve top md_chunks (docs) by similarity (dummy logic, replace with real vector search)
-  let docContext = '';
-  try {
-    const docResults = await pool.query(
-      `SELECT chunk FROM md_chunks ORDER BY embedding <#> (SELECT embedding FROM md_chunks LIMIT 1) LIMIT 3`
-    );
-    docContext = docResults.rows.map(r => r.chunk).join('\n');
-  } catch (e) { docContext = ''; }
+  // Format schema as table-to-columns map
+  const tableToCols = {};
+  schemaRows.forEach(r => {
+    if (!r.table_name) return;
+    if (!tableToCols[r.table_name]) tableToCols[r.table_name] = new Set();
+    if (r.column_name) tableToCols[r.table_name].add(r.column_name);
+  });
+  const formattedSchema = Object.entries(tableToCols)
+    .map(([table, cols]) => `${table}: ${(Array.from(cols).join(', ') || '(no columns)')}`)
+    .join('\n');
 
-  // 3. Compose system prompt
-  const systemPrompt = `You are an expert AI SQL assistant. Use the following schema and documentation context to help the user.\n\nSCHEMA:\n${schemaContext}\n\nDOCS:\n${docContext}\n\nThe user may also provide SQL code. Be concise, accurate, and helpful.`;
+  // Strong, isolated system prompt (no DOCS)
+  const systemPrompt = `YOU ARE AN EXPERT AI SQL ASSISTANT.\n\n**IMPORTANT: ONLY answer using the SCHEMA below. DO NOT use any other knowledge, documentation, or system catalogs. DO NOT mention information_schema, pg_tables, or meta-commands. If you do not know the answer from the schema, say so.**\n\nSCHEMA:\n${formattedSchema}`;
+  // Log the final system prompt for debugging
+  console.log('[AI-CHAT] FINAL SYSTEM PROMPT:\n', systemPrompt);
 
-  // 4. Call Anthropic API
+  // 5. Call Anthropic API
   try {
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -118,7 +148,25 @@ app.post('/api/ai-chat', async (req, res) => {
     });
     const anthropicData = await anthropicRes.json();
     if (!anthropicRes.ok) throw new Error(anthropicData.error?.message || 'Anthropic API error');
-    res.json({ response: anthropicData.content?.[0]?.text || '' });
+    // Try to extract SQL code blocks from the response
+    const aiText = anthropicData.content?.[0]?.text || '';
+    let sqlEditorAction = null;
+    // Improved extraction: extract all ```sql ... ``` code blocks (global, multiline)
+    const sqlCodeBlocks = [];
+    const codeBlockRegex = /```sql\s*([\s\S]*?)```/gim;
+    let match;
+    while ((match = codeBlockRegex.exec(aiText)) !== null) {
+      if (match[1]) sqlCodeBlocks.push(match[1].trim());
+    }
+    // Fallback: also extract any lines that look like SQL if no code blocks found
+    if (sqlCodeBlocks.length === 0) {
+      const fallbackSql = aiText.match(/((SELECT|INSERT|UPDATE|DELETE)[^`]+(;|$))/im);
+      if (fallbackSql && fallbackSql[1]) sqlCodeBlocks.push(fallbackSql[1].trim());
+    }
+    if (sqlCodeBlocks.length > 0) {
+      sqlEditorAction = { action: 'insert', code: sqlCodeBlocks.join('\n\n') };
+    }
+    res.json({ response: aiText, ...(sqlEditorAction ? { sql_editor_action: sqlEditorAction } : {}) });
   } catch (err) {
     res.status(500).json({ error: err.message || 'AI chat failed' });
   }
