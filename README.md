@@ -29,6 +29,7 @@ This project is a modern, intuitive web-based UI for database administration and
 - Query and chat history persistence
 - AI assistant always sees full editor content
 - Object explorer groups tables by comment
+- **System prompt is now user-editable**: The system prompt can be updated at runtime, allowing flexible agent behavior and experimentation.
 
 ## Recent Features Added (2025-04)
 - **AI Chat Assistant**: Integrated Anthropic Sonnet 3.7 LLM via `/api/ai-chat` endpoint. Streams responses in a dedicated right-side panel.
@@ -40,11 +41,12 @@ This project is a modern, intuitive web-based UI for database administration and
 - **Multi-query Support**: Query editor supports multiple queries per submission.
 - **History Persistence**: Every executed query and chat is saved to the database for auditing.
 - **Security**: API keys secured in `.env`, backend never exposes secrets to frontend, user input validated.
+- **Agent SQL Insertion Markup** (2025-04-18): All agent-generated SQL is now inserted into the editor with two blank lines above and below, and clear header/footer comments (`-- BEGIN AGENT GENERATED SQL --`, `-- END AGENT GENERATED SQL --`). This ensures visually distinct, clearly marked SQL blocks regardless of how the agent returns code.
 
 ## Current Status (2025-04-18)
 
 - The AI assistant now answers **only using schema embeddings**; all documentation and md_chunks vector store context have been removed from the prompt, ensuring the agent relies strictly on the schema.
-- The system prompt is highly forceful and isolated, instructing the LLM to use only the schema and ignore system catalogs, meta-commands, and general knowledge.
+- The system prompt is **user-editable and flexible**; it is no longer rigidly locked to a single style, allowing users to experiment with different agent behaviors.
 - Frontend vetting logic flags hallucinated table names and provides user controls for regenerating or approving responses.
 - The chat panel now auto-scrolls to the latest message, improving UX.
 - All major blockers around context leakage and hallucinated SQL have been mitigated. Backend guardrails are recommended for 100% reliability on schema enumeration/count queries.
