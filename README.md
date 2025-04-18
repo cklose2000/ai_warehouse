@@ -30,6 +30,17 @@ This project is a modern, intuitive web-based UI for database administration and
 - AI assistant always sees full editor content
 - Object explorer groups tables by comment
 
+## Recent Features Added (2025-04)
+- **AI Chat Assistant**: Integrated Anthropic Sonnet 3.7 LLM via `/api/ai-chat` endpoint. Streams responses in a dedicated right-side panel.
+- **Streaming Chat UI**: AI chat panel displays streaming responses, supports multi-line input, and always has access to the SQL editor.
+- **Results Copy Button**: One-click copy of results as TSV to clipboard, with Snackbar notification.
+- **Dark Mode & Tiny Text**: Full dark mode, extremely small text for all UI elements.
+- **Resizable Panes**: All panes (object explorer, editor, results, chat) are slidable/resizable.
+- **Object Explorer**: Groups tables by comment, supports refresh, and collapsible groups.
+- **Multi-query Support**: Query editor supports multiple queries per submission.
+- **History Persistence**: Every executed query and chat is saved to the database for auditing.
+- **Security**: API keys secured in `.env`, backend never exposes secrets to frontend, user input validated.
+
 ## Project Structure
 ```
 /ai-warehouse/
