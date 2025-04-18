@@ -22,24 +22,77 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Utility: Insert chat history log
+async function logChatHistory({ started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source }) {
+  try {
+    await pool.query(
+      `INSERT INTO chat_history (started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source]
+    );
+  } catch (e) {
+    console.error('[LOGGING] Failed to log chat_history:', e);
+  }
+}
+
+// Utility: Insert query history log
+async function logQueryHistory({ executed_at, user_id, session_id, query_text, status, error_message, tags, duration_ms, result_sample }) {
+  try {
+    await pool.query(
+      `INSERT INTO query_history (executed_at, user_id, session_id, query_text, status, error_message, tags, duration_ms, result_sample)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [executed_at, user_id, session_id, query_text, status, error_message, tags, duration_ms, result_sample]
+    );
+  } catch (e) {
+    console.error('[LOGGING] Failed to log query_history:', e);
+  }
+}
+
 // Query endpoint with row limit
 app.post('/api/query', async (req, res) => {
-  let { sql, rowLimit } = req.body;
+  let { sql, rowLimit, user_id, session_id, tags } = req.body;
   if (!sql) {
     return res.status(400).json({ error: 'SQL required' });
   }
   rowLimit = Math.max(1, Math.min(parseInt(rowLimit || 1000, 10), 100000));
-  // Try to append LIMIT if not present (simple heuristic for SELECTs)
   let sqlToRun = sql.trim();
   if (/^select/i.test(sqlToRun) && !/limit\s+\d+$/i.test(sqlToRun)) {
     sqlToRun += ` LIMIT ${rowLimit}`;
   }
+  const start = Date.now();
+  let status = 'success', error_message = null, result_sample = null;
   try {
     const result = await pool.query(sqlToRun);
+    // Sample first row as JSON string (for preview)
+    result_sample = result.rows && result.rows[0] ? JSON.stringify(result.rows[0]).slice(0, 500) : null;
     res.json({ rows: result.rows, fields: result.fields, rowLimit });
+    await logQueryHistory({
+      executed_at: new Date(),
+      user_id,
+      session_id,
+      query_text: sqlToRun,
+      status,
+      error_message,
+      tags,
+      duration_ms: Date.now() - start,
+      result_sample
+    });
   } catch (err) {
+    status = 'error';
+    error_message = err.message || 'Unknown error';
     console.error('Query error:', err);
-    res.status(400).json({ error: err.message || 'Unknown error', details: err });
+    res.status(400).json({ error: error_message, details: err });
+    await logQueryHistory({
+      executed_at: new Date(),
+      user_id,
+      session_id,
+      query_text: sqlToRun,
+      status,
+      error_message,
+      tags,
+      duration_ms: Date.now() - start,
+      result_sample
+    });
   }
 });
 
@@ -72,9 +125,13 @@ app.get('/api/object-explorer', async (req, res) => {
 
 // AI Chat endpoint: integrates Anthropic Sonnet 3.7, schema embeddings, and docs
 app.post('/api/ai-chat', async (req, res) => {
-  const { message, editorContents } = req.body;
+  const { message, editorContents, chatHistory, user_id, agent_id, session_id, tags, context, rating, source } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
+  const chatStartedAt = new Date();
+  let aiText = '', chatEndedAt;
+  let aiResponse = null;
+  let error_message = null;
   // 1. Embed user message using OpenAI
   let userEmbedding;
   try {
@@ -120,8 +177,19 @@ app.post('/api/ai-chat', async (req, res) => {
     .map(([table, cols]) => `${table}: ${(Array.from(cols).join(', ') || '(no columns)')}`)
     .join('\n');
 
-  // Strong, isolated system prompt (no DOCS)
-  const systemPrompt = `YOU ARE AN EXPERT AI SQL ASSISTANT.\n\n**IMPORTANT: ONLY answer using the SCHEMA below. DO NOT use any other knowledge, documentation, or system catalogs. DO NOT mention information_schema, pg_tables, or meta-commands. If you do not know the answer from the schema, say so.**\n\nSCHEMA:\n${formattedSchema}`;
+  // Loosened system prompt with robust triple-backtick handling
+  const systemPrompt = [
+    'YOU ARE AN EXPERT AI DBA AND SQL ASSISTANT.',
+    'Try to help the user with their questions based on your awareness of the schema_embeddings vector.',
+    '',
+    '**IMPORTANT: If you provide SQL statements, ALWAYS put ALL statements in a single triple-backtick SQL code block, like this:**',
+    '```sql',
+    '<your SQL statements here>',
+    '```',
+    '',
+    'SCHEMA:',
+    formattedSchema
+  ].join('\n');
   // Log the final system prompt for debugging
   console.log('[AI-CHAT] FINAL SYSTEM PROMPT:\n', systemPrompt);
 
@@ -138,37 +206,70 @@ app.post('/api/ai-chat', async (req, res) => {
         model: process.env.ANTHROPIC_MODEL || 'claude-3-sonnet-20240229',
         max_tokens: 1024,
         system: systemPrompt,
-        messages: [
-          { role: 'user', content: [
-            { type: 'text', text: message },
-            editorContents ? { type: 'text', text: `SQL Editor Contents:\n${editorContents}` } : undefined
-          ].filter(Boolean) }
-        ]
-      })
+        messages: chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0
+          ? chatHistory
+          : [
+              { role: 'user', content: [
+                { type: 'text', text: message },
+                editorContents ? { type: 'text', text: `SQL Editor Contents:\n${editorContents}` } : undefined
+              ].filter(Boolean) }
+            ]
+      }),
     });
     const anthropicData = await anthropicRes.json();
     if (!anthropicRes.ok) throw new Error(anthropicData.error?.message || 'Anthropic API error');
+    aiText = anthropicData.content?.[0]?.text || '';
+    chatEndedAt = new Date();
     // Try to extract SQL code blocks from the response
-    const aiText = anthropicData.content?.[0]?.text || '';
-    let sqlEditorAction = null;
-    // Improved extraction: extract all ```sql ... ``` code blocks (global, multiline)
     const sqlCodeBlocks = [];
-    const codeBlockRegex = /```sql\s*([\s\S]*?)```/gim;
+    // Match ```sql ... ``` and also ``` ... ```
+    const codeBlockRegex = /```(?:sql)?\s*([\s\S]*?)```/gim;
     let match;
     while ((match = codeBlockRegex.exec(aiText)) !== null) {
       if (match[1]) sqlCodeBlocks.push(match[1].trim());
     }
     // Fallback: also extract any lines that look like SQL if no code blocks found
     if (sqlCodeBlocks.length === 0) {
-      const fallbackSql = aiText.match(/((SELECT|INSERT|UPDATE|DELETE)[^`]+(;|$))/im);
+      const fallbackSql = aiText.match(/((SELECT|INSERT|UPDATE|DELETE|DESCRIBE|SHOW)[^`]+(;|$))/im);
       if (fallbackSql && fallbackSql[1]) sqlCodeBlocks.push(fallbackSql[1].trim());
     }
+    // Log extracted SQL code blocks for debugging
+    console.log('[AI-CHAT] Extracted SQL code blocks:', sqlCodeBlocks);
     if (sqlCodeBlocks.length > 0) {
-      sqlEditorAction = { action: 'insert', code: sqlCodeBlocks.join('\n\n') };
+      aiResponse = { action: 'insert', code: sqlCodeBlocks.join('\n\n') };
     }
-    res.json({ response: aiText, ...(sqlEditorAction ? { sql_editor_action: sqlEditorAction } : {}) });
+    aiResponse = { response: aiText, ...(aiResponse ? { sql_editor_action: aiResponse } : {}) };
+    res.json(aiResponse);
+    await logChatHistory({
+      started_at: chatStartedAt,
+      ended_at: chatEndedAt,
+      user_id,
+      agent_id,
+      session_id,
+      prompt: message,
+      response: aiText,
+      tags,
+      context,
+      rating,
+      source
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'AI chat failed' });
+    chatEndedAt = new Date();
+    error_message = err.message || 'AI chat failed';
+    res.status(500).json({ error: error_message });
+    await logChatHistory({
+      started_at: chatStartedAt,
+      ended_at: chatEndedAt,
+      user_id,
+      agent_id,
+      session_id,
+      prompt: message,
+      response: error_message,
+      tags,
+      context,
+      rating,
+      source
+    });
   }
 });
 
