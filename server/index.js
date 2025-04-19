@@ -86,24 +86,24 @@ async function logQueryHistory({ executed_at, user_id, session_id, query_text, s
   }
 }
 
-// Query endpoint with row limit
+// Query endpoint (no backend-enforced LIMIT)
 app.post('/api/query', async (req, res) => {
   let { sql, rowLimit, user_id, session_id, tags } = req.body;
   if (!sql) {
     return res.status(400).json({ error: 'SQL required' });
   }
-  rowLimit = Math.max(1, Math.min(parseInt(rowLimit || 1000, 10), 100000));
   let sqlToRun = sql.trim();
-  if (/^select/i.test(sqlToRun) && !/limit\s+\d+$/i.test(sqlToRun)) {
-    sqlToRun += ` LIMIT ${rowLimit}`;
-  }
+  // No longer append LIMIT automatically
   const start = Date.now();
   let status = 'success', error_message = null, result_sample = null;
   try {
     const result = await pool.query(sqlToRun);
-    // Sample first row as JSON string (for preview)
-    result_sample = result.rows && result.rows[0] ? JSON.stringify(result.rows[0]).slice(0, 500) : null;
-    res.json({ rows: result.rows, fields: result.fields, rowLimit });
+    res.json({
+      rows: result.rows,
+      fields: result.fields,
+      rowLimit,
+      limitInSql: undefined,
+    });
     await logQueryHistory({
       executed_at: new Date(),
       user_id,
