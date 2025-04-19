@@ -5,6 +5,44 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const { embedText } = require('./openai');
+const fs = require('fs');
+const path = require('path');
+const SYSTEM_PROMPT_PATH = path.join(__dirname, '../system_prompt.txt');
+
+function getSystemPrompt(formattedSchema, editorContents = '', sampledResults = '') {
+  let promptTemplate = '';
+  try {
+    promptTemplate = fs.readFileSync(SYSTEM_PROMPT_PATH, 'utf-8');
+  } catch (e) {
+    console.error('Failed to read system_prompt.txt, using default prompt.');
+    promptTemplate = [
+      'YOU ARE AN EXPERT AI DBA AND SQL ASSISTANT.',
+      'Try to help the user with their questions based on your awareness of the schema_embeddings vector.',
+      '',
+      '**IMPORTANT: If you provide SQL statements, ALWAYS put ALL statements in a single triple-backtick SQL code block, like this:**',
+      '```sql',
+      '<your SQL statements here>',
+      '```',
+      '',
+      'SCHEMA:',
+      '{SCHEMA}',
+      '',
+      '---',
+      'The user\'s current SQL editor contents:',
+      '{EDITOR_CONTENTS}',
+      '',
+      'Sampled results from recent queries:',
+      '{SAMPLED_RESULTS}',
+      '---',
+    ].join('\n');
+  }
+  // Replace placeholders with actual content
+  return promptTemplate
+    .replace(/SCHEMA:$/i, 'SCHEMA:\n' + formattedSchema)
+    .replace(/{SCHEMA}/g, formattedSchema)
+    .replace(/{EDITOR_CONTENTS}/g, editorContents)
+    .replace(/{SAMPLED_RESULTS}/g, sampledResults);
+}
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -125,7 +163,7 @@ app.get('/api/object-explorer', async (req, res) => {
 
 // AI Chat endpoint: integrates Anthropic Sonnet 3.7, schema embeddings, and docs
 app.post('/api/ai-chat', async (req, res) => {
-  const { message, editorContents, chatHistory, user_id, agent_id, session_id, tags, context, rating, source } = req.body;
+  const { message, editorContents, chatHistory, user_id, agent_id, session_id, tags, context, rating, source, sampledResults } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
   const chatStartedAt = new Date();
@@ -146,50 +184,28 @@ app.post('/api/ai-chat', async (req, res) => {
   const pgvector = '[' + userEmbedding.join(',') + ']';
 
   // 2. Retrieve full schema for context
-  let schemaContext = '';
   let schemaRows = [];
+  let formattedSchema = '';
   try {
-    const schemaResults = await pool.query(
-      `SELECT table_name, column_name FROM schema_embeddings`
-    );
+    // Dynamically fetch schema summary from information_schema
+    const schemaResults = await pool.query(`
+      SELECT table_name, string_agg(column_name, ', ' ORDER BY ordinal_position) AS columns
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+      GROUP BY table_name
+      ORDER BY table_name;
+    `);
     schemaRows = schemaResults.rows;
-    // Only use valid, unique table.column pairs for schema context
-    const uniquePairs = Array.from(new Set(schemaRows
-      .filter(r => r.table_name)
-      .map(r => r.column_name ? `${r.table_name}.${r.column_name}` : r.table_name)
-    ));
-    schemaContext = uniquePairs.join('\n');
-    console.log('[AI-CHAT] Full schema rows:', schemaRows.length);
-    console.log('[AI-CHAT] Unique table/column pairs:', uniquePairs.length);
+    formattedSchema = 'table_name\tcolumns\n' +
+      schemaRows.map(r => `${r.table_name}\t${r.columns}`).join('\n');
+    console.log('[AI-CHAT] Dynamic schema summary generated for system prompt.');
   } catch (e) {
     console.error('[AI-CHAT] Schema fetch failed:', e);
-    schemaContext = '';
+    formattedSchema = '';
   }
 
-  // Format schema as table-to-columns map
-  const tableToCols = {};
-  schemaRows.forEach(r => {
-    if (!r.table_name) return;
-    if (!tableToCols[r.table_name]) tableToCols[r.table_name] = new Set();
-    if (r.column_name) tableToCols[r.table_name].add(r.column_name);
-  });
-  const formattedSchema = Object.entries(tableToCols)
-    .map(([table, cols]) => `${table}: ${(Array.from(cols).join(', ') || '(no columns)')}`)
-    .join('\n');
-
-  // Loosened system prompt with robust triple-backtick handling
-  const systemPrompt = [
-    'YOU ARE AN EXPERT AI DBA AND SQL ASSISTANT.',
-    'Try to help the user with their questions based on your awareness of the schema_embeddings vector.',
-    '',
-    '**IMPORTANT: If you provide SQL statements, ALWAYS put ALL statements in a single triple-backtick SQL code block, like this:**',
-    '```sql',
-    '<your SQL statements here>',
-    '```',
-    '',
-    'SCHEMA:',
-    formattedSchema
-  ].join('\n');
+  // Use system prompt from file (or fallback), now with editorContents and sampledResults
+  const systemPrompt = getSystemPrompt(formattedSchema, editorContents || '', sampledResults || '');
   // Log the final system prompt for debugging
   console.log('[AI-CHAT] FINAL SYSTEM PROMPT:\n', systemPrompt);
 

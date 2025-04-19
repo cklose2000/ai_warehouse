@@ -32,6 +32,7 @@ This project is a modern, intuitive web-based UI for database administration and
 - AI assistant always sees full editor content
 - Object explorer groups tables by comment
 - **System prompt is now user-editable**: The system prompt can be updated at runtime, allowing flexible agent behavior and experimentation.
+- **Backend now loads system prompt from file** (2025-04-18): The backend reads the system prompt from `system_prompt.txt` at startup. To update the agent's behavior, simply edit this file and restart the backend server. This enables fast iteration and experimentation with prompt engineering, without code changes or redeploys.
 
 ## Recent Features Added (2025-04)
 - **AI Chat Assistant**: Integrated Anthropic Sonnet 3.7 LLM via `/api/ai-chat` endpoint. Streams responses in a dedicated right-side panel.
@@ -44,11 +45,18 @@ This project is a modern, intuitive web-based UI for database administration and
 - **History Persistence**: Every executed query and chat is saved to the database for auditing.
 - **Security**: API keys secured in `.env`, backend never exposes secrets to frontend, user input validated.
 - **Agent SQL Insertion Markup** (2025-04-18): All agent-generated SQL is now inserted into the editor with two blank lines above and below, and clear header/footer comments (`-- BEGIN AGENT GENERATED SQL --`, `-- END AGENT GENERATED SQL --`). This ensures visually distinct, clearly marked SQL blocks regardless of how the agent returns code.
+- **Dynamic Schema and Query Context Injection** (2025-04-19): Backend system prompt now supports `{EDITOR_CONTENTS}` and `{SAMPLED_RESULTS}` placeholders, dynamically injecting the current query editor contents and up to 3 sampled results into the agent's context for every chat request. Frontend always sends these with each chat message, so the agent is aware of user context without manual copy-paste.
+- **System Prompt Editable at Runtime**: The system prompt is fully user-editable via `system_prompt.txt` at project root. Edit and restart backend for rapid prompt engineering.
+- **Proposed: Last Run Query Display**: A feature to show the first 50 characters of the most recently run query in tiny font above or below the results grid, to help users keep track of what was just executed (pending user placement approval).
 
-## Current Status (2025-04-18)
+## Current Status (2025-04-19)
 
 - The AI assistant now answers **only using schema embeddings**; all documentation and md_chunks vector store context have been removed from the prompt, ensuring the agent relies strictly on the schema.
 - The system prompt is **user-editable and flexible**; it is no longer rigidly locked to a single style, allowing users to experiment with different agent behaviors.
+- The backend loads the system prompt from `system_prompt.txt` at startup. Edit this file and restart the backend to change the agent's instructions.
+- Backend now injects live schema, current editor contents, and up to 3 sampled results into the prompt for every chat request, so the agent always has up-to-date context.
+- Frontend always sends the editor contents and sampled results with each chat message.
+- Agent-generated SQL is inserted with clear header/footer and spacing for easy identification.
 - Frontend vetting logic flags hallucinated table names and provides user controls for regenerating or approving responses.
 - The chat panel now auto-scrolls to the latest message, improving UX.
 - All major blockers around context leakage and hallucinated SQL have been mitigated. Backend guardrails are recommended for 100% reliability on schema enumeration/count queries.

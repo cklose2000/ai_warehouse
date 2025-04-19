@@ -1,0 +1,16 @@
+event_type
+IssuesEvent
+IssueCommentEvent
+CreateEvent
+PublicEvent
+PullRequestEvent
+MemberEvent
+WatchEvent
+PushEvent
+ReleaseEvent
+CommitCommentEvent
+PullRequestReviewEvent
+ForkEvent
+DeleteEvent
+GollumEvent
+PullRequestReviewCommentEvent

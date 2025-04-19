@@ -19,15 +19,19 @@ POSTGRES_URL = os.getenv('POSTGRES_URL')
 client = bigquery.Client()
 
 def extract_github_data(query, output_filename):
+    output_file_path = f'github_data/{output_filename}'
+    if os.path.exists(output_file_path):
+        print(f"File {output_file_path} already exists. Skipping extraction.")
+        return
     print(f"Running query: {query[:100]}...")
     query_job = client.query(query)
     results = query_job.result()
     df = results.to_dataframe()
     os.makedirs('github_data', exist_ok=True)
     if output_filename.endswith('.csv'):
-        df.to_csv(f'github_data/{output_filename}', index=False)
+        df.to_csv(output_file_path, index=False)
     else:
-        df.to_parquet(f'github_data/{output_filename}', index=False)
+        df.to_parquet(output_file_path, index=False)
     print(f"Saved {df.shape[0]} rows to github_data/{output_filename}")
     return df
 
@@ -63,7 +67,8 @@ def copy_to_neon(df, table_name, bq_schema=None):
     cols = ', '.join([f'"{col}" {typ}' for col, typ in schema_cols])
     cur.execute(f'CREATE TABLE IF NOT EXISTS {table_name} ({cols});')
     columns = [col for col, _ in schema_cols]
-    values = [tuple(row.astype(str)) for _, row in df.iterrows()]
+    # Convert missing values to None for SQL NULL insertion
+    values = [tuple(None if pd.isna(v) else v for v in row) for _, row in df.iterrows()]
     col_names = ', '.join([f'"{col}"' for col in columns])
     insert_sql = f'INSERT INTO {table_name} ({col_names}) VALUES %s'
     psycopg2.extras.execute_values(cur, insert_sql, values, page_size=1000)
