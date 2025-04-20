@@ -49,18 +49,14 @@ This project is a modern, intuitive web-based UI for database administration and
 - **System Prompt Editable at Runtime**: The system prompt is fully user-editable via `system_prompt.txt` at project root. Edit and restart backend for rapid prompt engineering.
 - **Proposed: Last Run Query Display**: A feature to show the first 50 characters of the most recently run query in tiny font above or below the results grid, to help users keep track of what was just executed (pending user placement approval).
 
-## Current Status (2025-04-19)
+## Current Status (2025-04-20)
 
-- The AI assistant now answers **only using schema embeddings**; all documentation and md_chunks vector store context have been removed from the prompt, ensuring the agent relies strictly on the schema.
-- The system prompt is **user-editable and flexible**; it is no longer rigidly locked to a single style, allowing users to experiment with different agent behaviors.
-- The backend loads the system prompt from `system_prompt.txt` at startup. Edit this file and restart the backend to change the agent's instructions.
-- Backend now injects live schema, current editor contents, and up to 3 sampled results into the prompt for every chat request, so the agent always has up-to-date context.
-- Frontend always sends the editor contents and sampled results with each chat message.
-- Agent-generated SQL is inserted with clear header/footer and spacing for easy identification.
-- Frontend vetting logic flags hallucinated table names and provides user controls for regenerating or approving responses.
-- The chat panel now auto-scrolls to the latest message, improving UX.
-- All major blockers around context leakage and hallucinated SQL have been mitigated. Backend guardrails are recommended for 100% reliability on schema enumeration/count queries.
-- All code and configuration changes are up to date with the current state.
+- The AI assistant now reliably sees **all database tables**, including all `raw_*` tables, thanks to a dynamic schema injection fix.
+- The backend and frontend both deliver the full, up-to-date schema context to the agent and UI, as confirmed by backend logs and system prompt inspection.
+- The system prompt template now uses a `{SCHEMA}` placeholder, ensuring the backend injects the live schema block into every agent interaction.
+- The frontend and backend schema extraction logic has been reviewed for robustness; extraction is now resilient to formatting changes and includes all tables.
+- All previous issues with missing tables in agent responses are resolved. The agent now provides accurate, schema-aware SQL and advice for all tables.
+- See `system_prompt.txt` for the editable system prompt and `{SCHEMA}` placeholder usage.
 
 ### Next Steps
 - (Optional) Add backend interception for schema enumeration/count queries for guaranteed accuracy.
