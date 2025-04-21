@@ -16,6 +16,24 @@ This project is a modern, intuitive web-based UI for database administration and
 - Built with React + TypeScript (frontend) and Node.js + Express (backend), with Postgres as the database.
 - Uses environment variables from `.env` for all API keys and database URLs (see `.env` for details).
 
+## Major April 2025 Updates: Semantic Chat History & Context Injection
+
+- **Semantic (Vector) Search for Chat History:**
+  - The backend now generates OpenAI embeddings for each chat message and stores them in the `embedding` column of the `chat_history` table (using pgvector).
+  - When the user (or agent) asks to review or summarize past conversations about a topic, the backend automatically retrieves the most relevant chat history using both semantic (vector similarity) and keyword search.
+  - The agent is now aware of this capability and will focus on summarizing or analyzing the provided context, rather than writing SQL to search chat history.
+
+- **Automatic Context Injection:**
+  - Relevant chat history is injected into the agent's context for every new chat request, enabling the agent to reference and build upon previous conversations for improved continuity and relevance.
+
+- **System Prompt Improvements:**
+  - The system prompt now includes clear instructions about backend semantic search, so the agent does not need to write SQL for chat history lookups.
+  - The prompt is fully user-editable at runtime via `system_prompt.txt`.
+
+- **Bug Fixes:**
+  - Fixed vector format bug (`Vector contents must start with "["`) by ensuring embeddings are always formatted as Postgres vector literals before insertion.
+  - Schema extraction and delivery to the agent is now robust and always includes all tables, including `raw_*` tables.
+
 ## Setup
 1. Copy your required API keys and `POSTGRES_URL` into a `.env` file at the project root.
 2. Run `npm install` in both `/server` and `/client` directories.

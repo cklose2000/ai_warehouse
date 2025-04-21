@@ -69,10 +69,17 @@ app.get('/api/health', (req, res) => {
 // Utility: Insert chat history log
 async function logChatHistory({ started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source }) {
   try {
+    // Embed the prompt (user message) for semantic search
+    const toEmbed = prompt || response;
+    let embedding = null;
+    if (toEmbed) {
+      const arr = await embedText(toEmbed); // returns an array of floats
+      embedding = '[' + arr.join(',') + ']'; // format as Postgres vector literal
+    }
     await pool.query(
-      `INSERT INTO chat_history (started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source]
+      `INSERT INTO chat_history (started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source, embedding)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [started_at, ended_at, user_id, agent_id, session_id, prompt, response, tags, context, rating, source, embedding]
     );
   } catch (e) {
     console.error('[LOGGING] Failed to log chat_history:', e);
@@ -89,6 +96,23 @@ async function logQueryHistory({ executed_at, user_id, session_id, query_text, s
     );
   } catch (e) {
     console.error('[LOGGING] Failed to log query_history:', e);
+  }
+}
+
+// Helper: Retrieve relevant chat history by embedding similarity
+async function getRelevantChatHistory(userId, embedding, limit = 5) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT prompt AS message, response, created_at FROM chat_history WHERE user_id = $1 AND embedding IS NOT NULL ORDER BY embedding <#> $2::vector LIMIT $3',
+      [userId, embedding, limit]
+    );
+    return rows.map(r => ({
+      role: 'user', // You may enhance this if you track agent/user in the future
+      content: `[${r.created_at.toISOString()}] ${r.message}`
+    }));
+  } catch (e) {
+    console.error('[AI-CHAT] Failed to fetch relevant chat history:', e);
+    return [];
   }
 }
 
@@ -189,7 +213,16 @@ app.post('/api/ai-chat', async (req, res) => {
   // Convert JS array to Postgres vector string format '[0.1,0.2,...]'
   const pgvector = '[' + userEmbedding.join(',') + ']';
 
-  // 2. Retrieve full schema for context
+  // 2. Retrieve relevant chat history using embedding similarity
+  let relevantHistory = [];
+  try {
+    relevantHistory = await getRelevantChatHistory(user_id, pgvector, 5);
+    console.log('[AI-CHAT] Relevant chat history:', relevantHistory);
+  } catch (e) {
+    console.error('[AI-CHAT] Failed to retrieve relevant chat history:', e);
+  }
+
+  // 3. Retrieve full schema for context
   let schemaRows = [];
   let formattedSchema = '';
   try {
@@ -233,7 +266,9 @@ app.post('/api/ai-chat', async (req, res) => {
 
   // 5. Call OpenAI API
   try {
-    aiText = await chatWithOpenAI(systemPrompt, message, chatHistory, editorContents, sampledResults);
+    // Inject relevant history into chatHistory context
+    const chatHistoryWithContext = [...relevantHistory, ...(chatHistory || [])];
+    aiText = await chatWithOpenAI(systemPrompt, message, chatHistoryWithContext, editorContents, sampledResults);
     chatEndedAt = new Date();
     // Try to extract SQL code blocks from the response
     const sqlCodeBlocks = [];
