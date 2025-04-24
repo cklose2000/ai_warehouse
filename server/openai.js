@@ -25,7 +25,8 @@ async function embedText(text) {
   return data.data[0].embedding;
 }
 
-async function chatWithOpenAI(systemPrompt, message, chatHistory = [], editorContents = '', sampledResults = '') {
+// Patch chatWithOpenAI to support image input (OpenAI Vision)
+async function chatWithOpenAI(systemPrompt, message, chatHistory = [], editorContents = '', sampledResults = '', imageData = null) {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set');
   const messages = [];
   if (systemPrompt) {
@@ -38,11 +39,30 @@ async function chatWithOpenAI(systemPrompt, message, chatHistory = [], editorCon
       }
     }
   }
-  // Add user message and context
   let userContent = message;
   if (editorContents) userContent += `\n\nSQL Editor Contents:\n${editorContents}`;
   if (sampledResults) userContent += `\n\nSampled Results:\n${sampledResults}`;
-  messages.push({ role: 'user', content: userContent });
+  let userMessage;
+  if (imageData) {
+    userMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: userContent },
+        { type: 'image_url', image_url: { url: `data:${imageData.mimetype};base64,${imageData.base64}` } }
+      ]
+    };
+    console.log('[AI-CHAT] Vision payload: user message contains image:', {
+      mimetype: imageData.mimetype,
+      filename: imageData.originalname,
+      size: imageData.buffer.length
+    });
+  } else {
+    userMessage = { role: 'user', content: userContent };
+  }
+  messages.push(userMessage);
+
+  // Log the full payload sent to OpenAI
+  console.log('[AI-CHAT] Sending payload to OpenAI:', JSON.stringify({ model: OPENAI_MODEL, messages }, null, 2));
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -57,14 +77,19 @@ async function chatWithOpenAI(systemPrompt, message, chatHistory = [], editorCon
       temperature: 0.2,
     })
   });
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(`OpenAI Chat error: ${res.status} ${errData.error?.message || ''}`);
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    console.error('[AI-CHAT] Failed to parse OpenAI response:', err);
+    throw err;
   }
-  const data = await res.json();
-  return data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
-    ? data.choices[0].message.content
-    : '';
+  // Log the full OpenAI response
+  console.log('[AI-CHAT] OpenAI response:', JSON.stringify(data, null, 2));
+  if (!res.ok) {
+    throw new Error(`OpenAI Chat error: ${res.status} ${JSON.stringify(data)}`);
+  }
+  return data.choices[0].message.content;
 }
 
 module.exports = { embedText, chatWithOpenAI };

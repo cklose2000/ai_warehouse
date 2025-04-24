@@ -4,6 +4,13 @@
 
 This project is a modern, intuitive web-based UI for database administration and SQL analytics, inspired by Amazon Redshift Query Editor v2, with deep AI chat assistant (LLM) integration.
 
+## April 2025 UI/UX Improvements
+
+- **Image Upload UI**: Image upload is now fully invisible and non-intrusive. You can paste or drag images into the chat input, but there is no preview or visible upload area, maximizing space for chat.
+- **Chat Input Area**: The chat input is now visually distinct, with a clear border and background. It stretches to use available space, and the font size is extremely small for maximum density.
+- **Font Size Customization**: Chat input and chat window font size have been reduced by 5 points (now ~10px), for a compact, power-user-friendly experience.
+- **Focus/Usability Fixes**: The chat input is always clickable and focusable, with no UI elements blocking pointer or keyboard events.
+
 ## What this system does
 
 - Provides a dark-mode, resizable, space-efficient SQL query editor with syntax highlighting and multi-query support.
@@ -91,3 +98,54 @@ This project is a modern, intuitive web-based UI for database administration and
 
 ## License
 Proprietary, (c) 2025 cklose2000 and contributors.
+
+## Backlog Project: dbt Integration Ideas (NeonDB Serverless)
+
+These are potential features and architectural suggestions for incorporating dbt functionality into the UI, with special consideration for NeonDB serverless (no direct file storage):
+
+### 1. "dbt/YAML" Tab in SQL Editor
+- Add a dedicated tab for editing dbt model SQL and YAML config files (schema.yml, sources.yml, etc.)
+- Syntax highlighting for both SQL and YAML
+- Allow switching between SQL and YAML modes
+- Save changes to an external storage location (S3, GitHub, etc.)
+
+### 2. dbt Project Explorer Panel
+- Sidebar/panel that visualizes dbt project structure (models, sources, macros, snapshots)
+- Click to edit any file in the "dbt/YAML" tab
+- Show dbt documentation and model lineage in a preview pane
+
+### 3. dbt Run/Compile/Test Integration
+- Allow users to trigger dbt commands (run, compile, test) from the UI
+- Display logs and results in a dedicated output panel
+- Use a backend job runner (CI/CD, Lambda, etc.) to execute dbt with files from S3/GitHub
+
+### 4. dbt Model/SQL Preview and Linting
+- Live preview of compiled SQL as users edit models
+- YAML and dbt config validation
+- Inline error/warning display
+
+### 5. AI-Assisted dbt Authoring
+- Use the AI assistant to suggest dbt model SQL or YAML
+- Auto-generate schema.yml from table definitions
+- Summarize/explain dbt model logic
+
+### 6. Non-Database File Management (Serverless)
+- Store dbt project files in S3, GitHub, or similar
+- Backend acts as a proxy for editing/saving files
+- Optionally cache files in memory or ephemeral storage for editing sessions
+
+### 7. Example Workflow
+- User edits a dbt file in the UI, backend pushes to S3/GitHub
+- User triggers a dbt run, backend job runner executes and streams logs/results to UI
+
+### Summary Table
+
+| Feature                    | UI/UX Location      | Storage/Execution Strategy          |
+|----------------------------|---------------------|-------------------------------------|
+| dbt/YAML tab               | SQL editor          | S3, GitHub, or similar             |
+| Project explorer           | Sidebar/panel       | S3, GitHub, or similar             |
+| Run/compile/test dbt       | Button/panel        | Backend job runner (CI/Lambda)      |
+| AI dbt authoring           | Chat panel/editor   | N/A (uses AI, stores in above)      |
+| File management            | Explorer/editor     | S3, GitHub, or similar             |
+
+---

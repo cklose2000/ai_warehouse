@@ -1,0 +1,16 @@
+# github_etl/config.yaml
+# Configuration for GitHub ETL pipeline
+
+# Example structure
+repos:
+  - owner: example_org
+    name: example_repo
+  - owner: another_org
+    name: another_repo
+github_token: "${GITHUB_TOKEN}"
+db:
+  host: localhost
+  port: 5432
+  user: youruser
+  password: yourpassword
+  database: github_warehouse

@@ -8,6 +8,8 @@ const { embedText, chatWithOpenAI } = require('./openai');
 const fs = require('fs');
 const path = require('path');
 const SYSTEM_PROMPT_PATH = path.join(__dirname, '../system_prompt.txt');
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 function getSystemPrompt(formattedSchema, editorContents = '', sampledResults = '') {
   let promptTemplate = '';
@@ -192,8 +194,23 @@ app.get('/api/object-explorer', async (req, res) => {
 });
 
 // AI Chat endpoint: integrates OpenAI, schema embeddings, and docs
-app.post('/api/ai-chat', async (req, res) => {
+app.post('/api/ai-chat', upload.single('image'), async (req, res) => {
+  // If using multipart/form-data, fields are in req.body, file in req.file
   const { message, editorContents, chatHistory, user_id, agent_id, session_id, tags, context, rating, source, sampledResults } = req.body;
+  let imageData = null;
+  if (req.file) {
+    imageData = {
+      mimetype: req.file.mimetype,
+      buffer: fs.readFileSync(req.file.path),
+      base64: fs.readFileSync(req.file.path).toString('base64'),
+      filename: req.file.filename,
+      originalname: req.file.originalname,
+      path: req.file.path,
+    };
+    // Optionally: Clean up file after reading
+    // fs.unlinkSync(req.file.path);
+  }
+
   if (!message) return res.status(400).json({ error: 'Message required' });
 
   const chatStartedAt = new Date();
@@ -268,7 +285,7 @@ app.post('/api/ai-chat', async (req, res) => {
   try {
     // Inject relevant history into chatHistory context
     const chatHistoryWithContext = [...relevantHistory, ...(chatHistory || [])];
-    aiText = await chatWithOpenAI(systemPrompt, message, chatHistoryWithContext, editorContents, sampledResults);
+    aiText = await chatWithOpenAI(systemPrompt, message, chatHistoryWithContext, editorContents, sampledResults, imageData);
     chatEndedAt = new Date();
     // Try to extract SQL code blocks from the response
     const sqlCodeBlocks = [];
@@ -305,8 +322,9 @@ app.post('/api/ai-chat', async (req, res) => {
     });
   } catch (err) {
     chatEndedAt = new Date();
-    error_message = err.message || 'AI chat failed';
-    res.status(500).json({ error: error_message });
+    error_message = err && err.message ? err.message : (typeof err === 'string' ? err : JSON.stringify(err));
+    console.error('[AI-CHAT] Error during OpenAI call or response processing:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: error_message, details: err && err.stack ? err.stack : err });
     await logChatHistory({
       started_at: chatStartedAt,
       ended_at: chatEndedAt,
